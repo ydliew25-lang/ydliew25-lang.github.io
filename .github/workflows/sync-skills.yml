@@ -1,0 +1,55 @@
+name: Sync Skills catalog
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '33 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/*.py'
+      - '.github/workflows/sync-skills.yml'
+      - 'index.html'
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: skills-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+      - name: Run offline regression tests
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Initialize exact known legacy page once
+        run: python3 scripts/initialize_skills.py
+      - name: Validate and update only Skills regions
+        id: sync
+        run: python3 scripts/sync_skills.py --mode website --target index.html
+      - name: Commit changed Skills regions
+        run: |
+          if git diff --quiet -- index.html; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- index.html
+          git commit -m 'chore: synchronize Skills catalog'
+          git push origin HEAD:main
+      - name: Prepare static site artifact
+        run: |
+          mkdir -p _site
+          cp index.html _site/index.html
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: _site
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
